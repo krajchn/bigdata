@@ -7,10 +7,10 @@ import concurrent.futures
 
 class SequenceFileGenerator():
 
-    def __init__(self):
+    def __init__(self, inId=10000000, inLimit=100000):
         self.mHandle = None
-        self.mID = 10000000
-        self.mLimit = 1000
+        self.mID = inId
+        self.mLimit = inLimit
 
     def resize(self, inData, inSize = 5):
         if inSize - len(inData) > 0 :
