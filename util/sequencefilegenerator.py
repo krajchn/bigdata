@@ -4,8 +4,18 @@ import snappy
 import logging
 import sys
 import concurrent.futures
+from threading import Lock
+import logging
+from logging.handlers import RotatingFileHandler
+
+logging.basicConfig(filename="sequencer.log", format='%(asctime)s|%(levelname)s|%(thread)d|%(message)s')
+logger = logging.getLogger("sequencer")
+logger.setLevel(logging.DEBUG)
+
 
 class SequenceFileGenerator():
+
+    mMutex = Lock()
 
     def __init__(self, inId=10000000, inLimit=100000):
         self.mHandle = None
@@ -37,7 +47,7 @@ class SequenceFileGenerator():
     
     def compress(self, inData):
         try:
-            data = snappy.compress(inData)
+            data = snappy.compress(inData).hex()
             return data
         except:
             return None
@@ -56,11 +66,12 @@ class SequenceFileGenerator():
             buffer = None
             try:
                 data = handle.read()
-                buffer = self.compress(data).encode('hex')
+                buffer = self.compress(data)
                 # buffer = binascii.a2b_hex(handle.read())
             except Exception as ex:
                 logging.error("Failed to sequence: " + str(ex) + ":" + inFile)\
             #buffer = base64.encodestring(handle.read())
+            handle.close()
         return inFile, buffer
 
 
@@ -74,17 +85,17 @@ class SequenceFileGenerator():
                             ext = self.stripTrailingSpaces(line[8:13])
                             data = line[13:].rstrip("\n")
                             deData = self.decompress(data.decode('hex'))
-                            self.mHandle = open(os.path.join(outFolder,id+ext),"wb")
+                            self.mHandle = open(os.path.join(outFolder,id+ext),"w")
                             self.mHandle.write(deData.rstrip("\n"))
                             self.mHandle.close()
         else:
             index = 0
-            self.mHandle = open(os.path.join(outFolder, self.addTrailing(str(index),"0")),"wb")
-            self.mIDhandle = open("IDMap.txt","w")
+            self.mHandle = open(os.path.join(outFolder, self.addTrailing(str(index),"0")),"w")
+            #self.mIDhandle = open("IDMap.txt","w")
             for root, dirs, fileList in os.walk(inFolder):
-                with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executer:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executer:
                     requests = {
-                        executer.submit(self.processFile, os.path.join(inFolder,cfile),
+                        executer.submit(self.processFile, os.path.join(root,cfile),
                         os.path.join(outFolder,cfile)) :
                         cfile for cfile in fileList
                     }
@@ -95,20 +106,19 @@ class SequenceFileGenerator():
                         if self.mID != 10000000 and self.mID % self.mLimit == 0 :
                             index = index + 1
                             self.mHandle.close()
-                            self.mHandle = open(os.path.join(outFolder,self.addTrailing(str(index),"0")),"wb")
+                            self.mHandle = open(os.path.join(outFolder,self.addTrailing(str(index),"0")),"w")
                             logging.info("Processed " + str(self.mID))
                         pFile, buffer = futures.result()
                         if buffer:
                             id = os.path.basename(pFile)
                             name, ext = os.path.splitext(id)
-                            self.mIDhandle.write(pFile + "\t" + str(self.mID) + "\n")
+                            #self.mIDhandle.write(pFile + "\t" + str(self.mID) + "\n")
                             self.mHandle.write(str(self.mID))
                             self.mHandle.write(self.resize(ext))
                             self.mHandle.write(buffer)
                             self.mHandle.write("\n")
                             self.mID = self.mID + 1
                     except Exception as ex:
-                        logging.error("Failed to sequence: " + str(ex) + ":" + pFile)
-                
-                self.mIDhandle.close()
-                self.mHandle.close()
+                        logging.error("Failed to write sequence: " + str(ex) + ":" + pFile)
+        #self.mIDhandle.close()
+        self.mHandle.close()
